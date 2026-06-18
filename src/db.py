@@ -467,7 +467,9 @@ def list_pipeline(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
     Current status and its timestamp are computed from the latest status_event
     via correlated subqueries (status is never a stored column). ``sources`` is a
-    comma-separated list of distinct source sites across the job's listings.
+    comma-separated list of distinct source sites across the job's listings, and
+    ``url`` is the most recently seen listing URL (for "open the listing to
+    apply" links); both come from the listing ledger.
     """
     rows = conn.execute(
         """
@@ -475,6 +477,10 @@ def list_pipeline(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             j.id              AS job_id,
             j.company_name    AS company_name,
             j.title           AS title,
+            j.location        AS location,
+            j.remote_flag     AS remote_flag,
+            j.salary_min      AS salary_min,
+            j.salary_max      AS salary_max,
             j.match_score     AS match_score,
             j.decision        AS decision,
             (SELECT se.status FROM status_event se WHERE se.job_id = j.id
@@ -482,7 +488,9 @@ def list_pipeline(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             (SELECT se.occurred_at FROM status_event se WHERE se.job_id = j.id
              ORDER BY se.occurred_at DESC, se.id DESC LIMIT 1) AS last_event_at,
             (SELECT GROUP_CONCAT(DISTINCT l.source_site) FROM listing l
-             WHERE l.job_id = j.id) AS sources
+             WHERE l.job_id = j.id) AS sources,
+            (SELECT l.url FROM listing l WHERE l.job_id = j.id AND l.url IS NOT NULL
+             ORDER BY l.date_seen DESC, l.id DESC LIMIT 1) AS url
         FROM job j
         ORDER BY last_event_at DESC
         """
