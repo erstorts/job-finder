@@ -1,0 +1,72 @@
+"""Tests for pipeline staleness flags and application logging (PRD P2, P3, L2)."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from src import pipeline
+from src.config import get_config
+from src.db import (
+    add_status_event,
+    current_status,
+    get_application,
+    get_connection,
+    init_db,
+    insert_job,
+    list_pipeline,
+    save_application,
+)
+
+CONFIG = get_config()  # followup 7d, ghosted 21d
+
+
+def test_days_since_is_deterministic_with_injected_now() -> None:
+    now = datetime(2026, 6, 15, 12, 0, 0)
+    assert pipeline.days_since("2026-06-08T12:00:00", now=now) == 7
+    assert pipeline.days_since(None, now=now) is None
+    assert pipeline.days_since("garbage", now=now) is None
+
+
+def test_flags_thresholds() -> None:
+    assert pipeline.flags_for(3, False, CONFIG) == {
+        "needs_followup": False, "likely_ghosted": False}
+    assert pipeline.flags_for(7, False, CONFIG)["needs_followup"] is True
+    flagged = pipeline.flags_for(21, False, CONFIG)
+    assert flagged["needs_followup"] and flagged["likely_ghosted"]
+
+
+def test_terminal_status_never_flagged() -> None:
+    # Even long-idle terminal jobs need no follow-up.
+    assert pipeline.flags_for(100, True, CONFIG) == {
+        "needs_followup": False, "likely_ghosted": False}
+
+
+def _db():
+    conn = get_connection(":memory:")
+    init_db(conn)
+    return conn
+
+
+def test_application_logging_and_pipeline_row() -> None:
+    conn = _db()
+    job_id = insert_job(
+        conn, company_name="Acme", title="Data Engineer", location=None,
+        remote_flag=None, jd_text=None, salary_min=None, salary_max=None,
+        benefits=None, company_description=None, extracted_json="{}",
+    )
+    add_status_event(conn, job_id, "found", occurred_at="2026-06-01T09:00:00")
+
+    save_application(
+        conn, job_id, applied_at="2026-06-02T10:00:00", applied_via="referral",
+        cover_letter=1, tailored_resume=0, referral=1,
+    )
+    add_status_event(conn, job_id, "applied", occurred_at="2026-06-02T10:00:00")
+
+    app = get_application(conn, job_id)
+    assert app["applied_via"] == "referral"
+    assert app["cover_letter"] == 1 and app["referral"] == 1
+    assert current_status(conn, job_id) == "applied"
+
+    pipe = list_pipeline(conn)
+    assert len(pipe) == 1
+    assert pipe[0]["current_status"] == "applied"

@@ -1,0 +1,9 @@
+# JAMS pinned dependencies (PRD TECH6, DOC7).
+# Only these third-party libraries are allowed; do not add others without
+# asking the owner. SQLite/sqlite3 and tomllib are standard library.
+streamlit==1.40.2
+pydantic==2.10.4
+rapidfuzz==3.10.1
+pandas==2.2.3
+anthropic==0.109.2
+pytest==8.3.4

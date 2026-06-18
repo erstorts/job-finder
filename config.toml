@@ -1,0 +1,62 @@
+# =========================================================================
+# JAMS configuration (PRD TECH7, REPEAT3).
+#
+# Every tunable value in the system lives here so behavior can be changed
+# without editing code. There must be NO magic numbers in logic modules;
+# they read from this file (loaded once via tomllib in src/config.py).
+#
+# The rubric is versioned: `rubric.version` is stored on each scored job so
+# historical scores stay interpretable after the weights are tuned.
+# =========================================================================
+
+[llm]
+# Structured-extraction model (PRD §4 LLM provider note). Pinned here so the
+# only LLM touchpoint is reproducible at the config level. Confirm the current
+# model string against the official docs at build time (O1).
+model = "claude-sonnet-4-6"
+max_tokens = 2048
+
+[dedup]
+# Title-similarity thresholds for record linkage (PRD §9.1), applied AFTER
+# blocking on normalized company name. rapidfuzz token_sort_ratio, 0-100.
+confident_duplicate = 90   # >= this -> confident duplicate, attach listing, block re-apply
+borderline_floor = 75      # [borderline_floor, confident_duplicate) -> ask the user
+
+[followup]
+# Time-based pipeline flags (PRD P3), in days since the last status_event.
+# These are computed, never manually set.
+followup_days = 7          # non-terminal job idle this long -> needs follow-up
+ghosted_days = 21          # no response this long -> likely ghosted
+
+[scoring]
+# Active rubric version label, stored on each job as rubric_version.
+version = "v1"
+# Apply / pass threshold for the 0-100 composite (PRD §9.2). Configurable.
+apply_threshold = 60
+# Max allowed distance (in seniority bands) before the seniority hard gate
+# fails (PRD §9.2 hard gates).
+seniority_gate_max_distance = 1
+
+[scoring.weights]
+# Soft-criteria weights for rubric v1 (PRD §9.2). Should sum to 1.0.
+required_skill_coverage  = 0.45
+preferred_skill_coverage = 0.20
+seniority_alignment      = 0.15
+target_fit               = 0.15
+comp_floor_met           = 0.05
+
+[scoring.gates]
+# Hard constraints the user cannot meet (PRD §9.2). A listing whose extracted
+# hard_constraints intersect this set defaults to "pass". Edit to match the
+# owner's real situation; matching is case-insensitive substring.
+unmeetable_constraints = [
+    "security clearance",
+    "us citizenship",
+    "ts/sci",
+]
+
+[seniority]
+# Ordinal seniority bands, lowest to highest. Index distance between two bands
+# drives the seniority gate and the seniority_alignment sub-score. Shared
+# vocabulary between the profile target and the extraction contract.
+bands = ["intern", "junior", "mid", "senior", "staff", "lead", "manager"]
