@@ -14,7 +14,9 @@ from src.db import (
     init_db,
     insert_job,
     list_pipeline,
+    list_todo,
     save_application,
+    set_score,
 )
 
 CONFIG = get_config()  # followup 7d, ghosted 21d
@@ -68,3 +70,29 @@ def test_application_logging_and_pipeline_row() -> None:
     pipe = list_pipeline(conn)
     assert len(pipe) == 1
     assert pipe[0]["current_status"] == "applied"
+
+
+def test_todo_ordering() -> None:
+    conn = _db()
+
+    def found(company, loc, cover, posted, score):
+        jid = insert_job(
+            conn, company_name=company, title="Eng", location_type=loc,
+            jd_text=None, salary_min=None, salary_max=None,
+            cover_letter_option=cover, date_posted=posted, extracted_json="{}",
+        )
+        set_score(conn, jid, score, "{}", "ats-v1")
+        add_status_event(conn, jid, "found", occurred_at="2026-07-01T09:00:00")
+        return jid
+
+    # Denver-first, then no-cover-first, then freshest, then highest ATS.
+    found("A", "remote", 1, "2026-07-10", 90)   # remote, cover yes
+    found("B", "denver", 0, "2026-07-01", 50)   # denver, no cover, oldest
+    found("C", "denver", 0, "2026-07-05", 80)   # denver, no cover
+    found("D", "denver", 1, "2026-07-08", 95)   # denver, cover yes
+    found("E", "remote", 0, "2026-07-09", 70)   # remote, no cover
+    found("F", "denver", 0, "2026-07-05", 85)   # ties C on date -> higher score first
+
+    order = [r["company_name"] for r in list_todo(conn)]
+    # Denver group (F,C,B by no-cover+fresh+score, then D cover-yes), then remote (E no-cover, A).
+    assert order == ["F", "C", "B", "D", "E", "A"]

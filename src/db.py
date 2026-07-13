@@ -473,13 +473,42 @@ APPLIED_STATUSES: tuple[str, ...] = (
 )
 
 
+def _todo_sort_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    """Ordering for the to-do list (L1), applied as one ascending sort.
+
+    Priority: Denver before remote, then No-cover-letter before Yes, then the
+    freshest posting first (lowest days since posted / most recent date_posted,
+    missing dates last), then the highest ATS score first.
+    """
+    denver_first = 0 if row.get("location_type") == "denver" else 1
+    no_cover_first = 0 if not row.get("cover_letter_option") else 1
+
+    # Most-recent date_posted first: negate the ordinal so a larger (more recent)
+    # date sorts earlier in an ascending sort; missing/unparseable dates go last.
+    dp = row.get("date_posted")
+    try:
+        date_key: float = -datetime.fromisoformat(dp).toordinal() if dp else float("inf")
+    except ValueError:
+        date_key = float("inf")
+
+    # Highest ATS score first: negate so larger scores sort earlier; missing last.
+    score = row.get("match_score")
+    score_key = -score if score is not None else float("inf")
+
+    return (denver_first, no_cover_first, date_key, score_key)
+
+
 def list_todo(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """Return the to-do list: jobs whose current status is ``found`` (L1).
 
-    These are pursued-but-not-yet-applied jobs. Each row carries everything the
-    to-do table shows: the triage flags, the ATS score, and the apply link.
+    These are pursued-but-not-yet-applied jobs, ordered by :func:`_todo_sort_key`
+    (Denver first, then no-cover-letter, then freshest, then highest ATS score).
+    Each row carries everything the to-do table shows: the triage flags, the ATS
+    score, and the apply link.
     """
-    return [r for r in list_pipeline(conn) if r["current_status"] == "found"]
+    todo = [r for r in list_pipeline(conn) if r["current_status"] == "found"]
+    todo.sort(key=_todo_sort_key)
+    return todo
 
 
 def list_applied(conn: sqlite3.Connection) -> list[dict[str, Any]]:
