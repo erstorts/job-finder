@@ -79,16 +79,22 @@ def test_extract_invalid_arguments_raise() -> None:
         extraction_mod.extract_job("listing text", CONFIG, client=client)
 
 
-def test_suggest_aliases_passthrough() -> None:
+def test_extract_skill_aliases_passthrough() -> None:
     client = _FakeClient({
-        "suggestions": [{"canonical_skill": "orchestration", "alias": "dagster"}]
+        "suggestions": [{"canonical_skill": "orchestration", "alias": "airflow"}]
     })
-    result = extraction_mod.suggest_aliases(["orchestration"], CONFIG, client=client)
-    assert result.suggestions[0].alias == "dagster"
+    result = extraction_mod.extract_skill_aliases(
+        "Built ETL with Airflow.", None, CONFIG, client=client
+    )
+    assert result.suggestions[0].alias == "airflow"
+    # A forced tool call to the skill-alias tool is what we asked for.
+    assert client.messages.calls[0]["tool_choice"] == {
+        "type": "tool", "name": "record_skill_aliases",
+    }
 
 
-def test_suggest_aliases_empty_input_skips_call() -> None:
+def test_extract_skill_aliases_empty_input_skips_call() -> None:
     client = _FakeClient(None)
-    result = extraction_mod.suggest_aliases([], CONFIG, client=client)
+    result = extraction_mod.extract_skill_aliases(None, "   ", CONFIG, client=client)
     assert result.suggestions == []
-    assert client.messages.calls == []  # no LLM call for empty input
+    assert client.messages.calls == []  # no LLM call when there is no text

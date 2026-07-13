@@ -62,11 +62,16 @@ _EXTRACTION_SYSTEM = (
     "and technologies the listing names (these are matched against a resume)."
 )
 
-_ALIAS_SYSTEM = (
-    "You propose alternative surface forms (aliases) for canonical skills, to "
-    "build a controlled matching vocabulary. For each canonical skill, suggest "
-    "common tools, synonyms, and abbreviations a job listing might use. Return "
-    "only plausible, well-known aliases."
+_RESUME_SKILL_SYSTEM = (
+    "You read a candidate's resume and LinkedIn text and build a controlled "
+    "skill vocabulary used to match job listings against them. Identify the "
+    "concrete skills, tools, and technologies the candidate demonstrably has, "
+    "grounded ONLY in the text — never invent skills it does not support. "
+    "For each skill, output one or more (canonical_skill, alias) rows: "
+    "canonical_skill is a short normalized name (e.g. 'orchestration', "
+    "'python'), and alias is a common surface form a job listing might use for "
+    "it (e.g. 'airflow', 'py'). Include the skill's own common name as one "
+    "alias, and give multiple rows for a skill that has several common names."
 )
 
 
@@ -115,16 +120,19 @@ def _forced_tool_call(
     system: str,
     user_content: str,
     tool: dict[str, Any],
+    max_tokens: int | None = None,
 ) -> dict[str, Any] | None:
     """Run a tool-forced message and return the tool input dict, or ``None``.
 
     Returns ``None`` if the model produced no matching tool_use block (e.g. a
-    refusal), so callers can decide whether that is fatal.
+    refusal), so callers can decide whether that is fatal. ``max_tokens``
+    overrides the default ``config["llm"]["max_tokens"]`` for calls whose output
+    is larger (e.g. extracting a full skill vocabulary).
     """
     llm_cfg = config["llm"]
     response = client.messages.create(
         model=llm_cfg["model"],
-        max_tokens=llm_cfg["max_tokens"],
+        max_tokens=max_tokens or llm_cfg["max_tokens"],
         system=system,
         tools=[tool],
         tool_choice={"type": "tool", "name": tool["name"]},
@@ -190,35 +198,38 @@ def extract_job(
         raise ValueError(f"Extraction failed schema validation: {exc}") from exc
 
 
-def suggest_aliases(
-    canonical_skills: list[str],
+def extract_skill_aliases(
+    resume_text: str | None,
+    linkedin_text: str | None,
     config: Mapping[str, Any],
     *,
     client: SupportsMessages | None = None,
 ) -> AliasSuggestions:
-    """Propose aliases for the user's canonical skills (S4, reviewed step).
+    """Extract a skill-alias vocabulary from the resume + LinkedIn text.
 
-    The returned suggestions are shown to the user for confirmation; nothing is
-    written to ``skill_alias`` here. Returns an empty wrapper rather than raising
-    when the model produces nothing, since this is an optional convenience.
+    The returned (canonical_skill, alias) suggestions are shown to the user for
+    confirmation; nothing is written to ``skill_alias`` here — that stays a
+    reviewed step, so the model never edits the vocabulary directly. Returns an
+    empty wrapper (rather than raising) when there is no text or the model
+    produces nothing, since this is an optional convenience.
     """
-    if not canonical_skills:
+    combined = "\n\n".join(t for t in (resume_text, linkedin_text) if t and t.strip())
+    if not combined.strip():
         return AliasSuggestions()
 
     client = client or _default_client()
     tool = _tool_for(
         AliasSuggestions,
-        "record_alias_suggestions",
-        "Record proposed aliases for the user's canonical skills.",
+        "record_skill_aliases",
+        "Record the skill vocabulary extracted from the candidate's resume "
+        "and LinkedIn text.",
     )
-    prompt = (
-        "Propose aliases for these canonical skills:\n"
-        + "\n".join(f"- {s}" for s in canonical_skills)
-    )
+    prompt = "Resume and LinkedIn text:\n\n" + combined
     raw = _forced_tool_call(
-        client, config, system=_ALIAS_SYSTEM, user_content=prompt, tool=tool
+        client, config, system=_RESUME_SKILL_SYSTEM, user_content=prompt, tool=tool,
+        max_tokens=config["llm"].get("alias_max_tokens"),
     )
-    if raw is None:
+    if not raw:  # None (no tool block) or {} (output truncated mid-JSON)
         return AliasSuggestions()
     try:
         return AliasSuggestions.model_validate(raw)

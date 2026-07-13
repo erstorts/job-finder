@@ -13,7 +13,12 @@
 # Structured-extraction model. Pinned here so the only LLM touchpoint is
 # reproducible at the config level.
 model = "claude-sonnet-4-6"
+# Token budget for extracting one job listing (small, bounded output).
 max_tokens = 2048
+# Token budget for extracting the whole skill vocabulary from a resume +
+# LinkedIn. A rich profile yields 100+ (canonical, alias) rows, which overruns
+# 2048 and truncates the tool JSON — give it plenty of headroom.
+alias_max_tokens = 8192
 
 [dedup]
 # Title-similarity thresholds for record linkage, applied AFTER blocking on
