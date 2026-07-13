@@ -1,65 +1,43 @@
-"""Interview prep page (PRD I1).
+"""Interview prep page (I1).
 
-Lists jobs currently in an interview stage and, for each, shows the frozen
-captured details — jd_text, company description, salary, benefits — plus the
-source listing link(s) for preparation.
+Lists every job that landed an interview (current status ``landed_interview``)
+with a button to open the original listing so you can prep against it.
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-from src.db import get_job, get_listings, jobs_in_statuses
+from src.db import get_listings, jobs_in_statuses
 from ui_common import get_conn
-
-INTERVIEW_STAGES = ["recruiter_screen", "hiring_manager", "onsite"]
 
 st.set_page_config(page_title="Interview prep — JAMS", layout="wide")
 st.title("Interview prep")
 
 conn = get_conn()
 
-interviews = jobs_in_statuses(conn, INTERVIEW_STAGES)
+interviews = jobs_in_statuses(conn, ["landed_interview"])
 if not interviews:
-    st.info("No jobs are currently in an interview stage "
-            "(recruiter screen, hiring manager, or onsite).")
+    st.info(
+        "No interviews yet. Mark a job as **Landed interview** on the "
+        "**Pipeline** page and it'll show up here to prep."
+    )
     st.stop()
 
-st.caption("Showing the originally captured details (frozen at capture) for each "
-           "job currently interviewing.")
+st.caption("Jobs where you landed an interview. Open the listing to prep against it.")
 
 for row in interviews:
-    job = get_job(conn, row["job_id"])
-    header = f"{job['company_name']} — {job['title']}  ·  {row['current_status']}"
-    with st.expander(header, expanded=False):
-        meta = []
-        if job.get("location"):
-            meta.append(f"📍 {job['location']}")
-        if job.get("remote_flag") is not None:
-            meta.append("🏠 Remote" if job["remote_flag"] else "🏢 On-site")
-        if job.get("salary_min") or job.get("salary_max"):
-            meta.append(f"💰 {job.get('salary_min') or '?'}–{job.get('salary_max') or '?'}")
-        if meta:
-            st.write("  ·  ".join(meta))
+    job_id = row["job_id"]
+    c1, c2 = st.columns([5, 2])
+    loc = "Denver" if row.get("location_type") == "denver" else "Remote"
+    c1.markdown(f"**{row['company_name']} — {row['title']}**  ·  {loc}")
 
-        if job.get("benefits"):
-            st.markdown(f"**Benefits:** {job['benefits']}")
-        if job.get("company_description"):
-            st.markdown("**Company**")
-            st.write(job["company_description"])
-
-        st.markdown("**Listing text (frozen at capture)**")
-        st.text_area(
-            "jd_text", value=job.get("jd_text") or "(none captured)",
-            height=200, disabled=True, key=f"jd_{job['id']}", label_visibility="collapsed",
-        )
-
-        listings = get_listings(conn, job["id"])
-        if listings:
-            st.markdown("**Source listing(s)**")
-            for l in listings:
-                site = l["source_site"] or "source"
-                if l["url"]:
-                    st.markdown(f"- [{site}]({l['url']}) · seen {l['date_seen']}")
-                else:
-                    st.markdown(f"- {site} · seen {l['date_seen']} (no URL)")
+    # The apply link doubles as the listing link for prep.
+    url = row.get("url")
+    if not url:
+        listings = get_listings(conn, job_id)
+        url = next((l["url"] for l in listings if l["url"]), None)
+    if url:
+        c2.link_button("Open listing ↗", url, use_container_width=True)
+    else:
+        c2.caption("No listing link")

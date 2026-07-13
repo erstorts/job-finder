@@ -50,21 +50,19 @@ def _db():
 def test_application_logging_and_pipeline_row() -> None:
     conn = _db()
     job_id = insert_job(
-        conn, company_name="Acme", title="Data Engineer", location=None,
-        remote_flag=None, jd_text=None, salary_min=None, salary_max=None,
-        benefits=None, company_description=None, extracted_json="{}",
+        conn, company_name="Acme", title="Data Engineer", location_type="remote",
+        jd_text=None, salary_min=None, salary_max=None,
+        cover_letter_option=None, date_posted=None, extracted_json="{}",
     )
     add_status_event(conn, job_id, "found", occurred_at="2026-06-01T09:00:00")
 
     save_application(
-        conn, job_id, applied_at="2026-06-02T10:00:00", applied_via="referral",
-        cover_letter=1, tailored_resume=0, referral=1,
+        conn, job_id, applied_at="2026-06-02T10:00:00", linkedin_contact=1,
     )
     add_status_event(conn, job_id, "applied", occurred_at="2026-06-02T10:00:00")
 
     app = get_application(conn, job_id)
-    assert app["applied_via"] == "referral"
-    assert app["cover_letter"] == 1 and app["referral"] == 1
+    assert app["linkedin_contact"] == 1
     assert current_status(conn, job_id) == "applied"
 
     pipe = list_pipeline(conn)
