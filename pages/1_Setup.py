@@ -61,6 +61,10 @@ with st.form("profile_form"):
         )
         st.success("Profile saved.")
 
+# Re-read after the form so the sections below (skill extraction) see a
+# just-saved profile in the same run rather than the stale top-of-script read.
+profile = get_profile(conn) or {}
+
 st.divider()
 
 # --------------------------------------------------------------------------
