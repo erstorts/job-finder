@@ -120,16 +120,19 @@ def _forced_tool_call(
     system: str,
     user_content: str,
     tool: dict[str, Any],
+    max_tokens: int | None = None,
 ) -> dict[str, Any] | None:
     """Run a tool-forced message and return the tool input dict, or ``None``.
 
     Returns ``None`` if the model produced no matching tool_use block (e.g. a
-    refusal), so callers can decide whether that is fatal.
+    refusal), so callers can decide whether that is fatal. ``max_tokens``
+    overrides the default ``config["llm"]["max_tokens"]`` for calls whose output
+    is larger (e.g. extracting a full skill vocabulary).
     """
     llm_cfg = config["llm"]
     response = client.messages.create(
         model=llm_cfg["model"],
-        max_tokens=llm_cfg["max_tokens"],
+        max_tokens=max_tokens or llm_cfg["max_tokens"],
         system=system,
         tools=[tool],
         tool_choice={"type": "tool", "name": tool["name"]},
@@ -223,9 +226,10 @@ def extract_skill_aliases(
     )
     prompt = "Resume and LinkedIn text:\n\n" + combined
     raw = _forced_tool_call(
-        client, config, system=_RESUME_SKILL_SYSTEM, user_content=prompt, tool=tool
+        client, config, system=_RESUME_SKILL_SYSTEM, user_content=prompt, tool=tool,
+        max_tokens=config["llm"].get("alias_max_tokens"),
     )
-    if raw is None:
+    if not raw:  # None (no tool block) or {} (output truncated mid-JSON)
         return AliasSuggestions()
     try:
         return AliasSuggestions.model_validate(raw)
