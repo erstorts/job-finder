@@ -106,38 +106,52 @@ with st.form("add_alias_form", clear_on_submit=True):
 st.divider()
 
 # --------------------------------------------------------------------------
-# LLM-assisted alias suggestion — always a reviewed step: nothing is written
-# without confirmation, and the model never edits the vocabulary directly.
+# LLM extraction — build the vocabulary from the resume + LinkedIn text. Always
+# a reviewed step: nothing is written without confirmation, and the model never
+# edits the vocabulary directly.
 # --------------------------------------------------------------------------
-st.header("Suggest aliases")
+st.header("Extract skills from your resume & LinkedIn")
 st.caption(
-    "Propose more surface forms for your existing canonical skills. Suggestions "
-    "are a reviewed step — nothing is written until you confirm."
+    "Let the LLM read your saved resume + LinkedIn text and propose the whole "
+    "skill vocabulary (canonical skills and the aliases a listing might use). "
+    "It's a reviewed step — nothing is written until you confirm."
 )
 
-canonicals = sorted({row["canonical_skill"] for row in aliases})
+has_profile_text = bool(
+    (profile.get("resume_text") or "").strip()
+    or (profile.get("linkedin_text") or "").strip()
+)
 
-if not canonicals:
-    st.info("Add at least one skill alias above first, then suggestions can "
-            "expand its canonical skill with more surface forms.")
-elif st.button("Suggest aliases"):
+if not has_profile_text:
+    st.info("Save your resume (and optionally LinkedIn) text above first, then "
+            "the LLM can extract your skills from it.")
+elif st.button("Extract skills from resume & LinkedIn"):
     try:
-        with st.spinner("Asking the LLM for alias suggestions…"):
-            result = extraction_mod.suggest_aliases(canonicals, config)
+        with st.spinner("Reading your resume & LinkedIn…"):
+            result = extraction_mod.extract_skill_aliases(
+                profile.get("resume_text"), profile.get("linkedin_text"), config
+            )
         st.session_state["alias_suggestions"] = [
             s.model_dump() for s in result.suggestions
         ]
+        if not result.suggestions:
+            st.warning("No skills were extracted. Check that your resume text is "
+                       "saved above.")
     except Exception as exc:  # noqa: BLE001 — surface API/setup errors to the user
-        st.error(f"Suggestion failed: {exc}. Is ANTHROPIC_API_KEY set?")
+        st.error(f"Extraction failed: {exc}. Is ANTHROPIC_API_KEY set?")
 
 pending = st.session_state.get("alias_suggestions")
 if pending:
     existing = {(r["canonical_skill"], r["alias"]) for r in aliases}
     fresh = [s for s in pending if (s["canonical_skill"], s["alias"]) not in existing]
     if not fresh:
-        st.success("All suggested aliases are already in your vocabulary.")
+        st.success("Every extracted alias is already in your vocabulary.")
     else:
-        st.write("**Review suggestions** — check the ones to add:")
+        st.write("**Review extracted skills** — check the ones to add:")
+        c_all1, c_all2 = st.columns([1, 4])
+        if c_all1.button("Select all"):
+            for i in range(len(fresh)):
+                st.session_state[f"sugg_{i}"] = True
         chosen = []
         for i, s in enumerate(fresh):
             if st.checkbox(
