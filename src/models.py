@@ -12,28 +12,26 @@ from pydantic import BaseModel, Field
 
 
 class JobExtraction(BaseModel):
-    """Structured facts extracted from a single job listing (PRD §8).
+    """Structured facts extracted from a single job listing.
 
-    Every field maps 1:1 to the contract in the PRD. Optional scalars are
-    ``None`` when absent; list fields default to empty. ``min_years`` is
-    captured but deliberately not scored in v1 (§9.2).
+    Focused on what the ATS keyword match needs: the identity of the role, the
+    pay range, and the required/preferred skills that get matched against the
+    resume + LinkedIn text. ``location`` and ``remote_flag`` are captured only as
+    hints to prefill the Denver/remote toggle at triage. Optional scalars are
+    ``None`` when absent; list fields default to empty. Nothing is invented —
+    fields not present in the listing text stay null/empty.
     """
 
     company_name: str | None = None
     title: str | None = None
-    location: str | None = None
-    remote_flag: bool | None = None
     salary_min: int | None = None
     salary_max: int | None = None
-    benefits: str | None = None
-    company_description: str | None = None
-    company_types: list[str] = Field(default_factory=list)   # e.g. ["saas", "startup"]; [] if unclear
     required_skills: list[str] = Field(default_factory=list)  # skills the listing marks as required
     preferred_skills: list[str] = Field(default_factory=list)  # nice-to-have skills
-    min_years: int | None = None             # captured but NOT scored in v1
-    degree_required: bool | None = None
-    seniority: str | None = None             # ordinal band, same vocabulary as profile
-    hard_constraints: list[str] = Field(default_factory=list)  # e.g. ["security clearance", "on-site NYC"]
+    # Hints only (the user sets the real Denver/remote flag at triage).
+    location: str | None = None
+    remote_flag: bool | None = None
+    cover_letter_mentioned: bool | None = None  # hint: does the listing mention a cover letter
 
 
 class AliasSuggestion(BaseModel):

@@ -58,8 +58,8 @@ _EXTRACTION_SYSTEM = (
     "You extract structured facts from a single job listing. Populate ONLY "
     "fields explicitly supported by the listing text. If a field is not present, "
     "leave it null (or an empty list). Never guess, infer, or invent values. "
-    "Normalize the seniority field to one of: intern, junior, mid, senior, "
-    "staff, lead, manager."
+    "For required_skills and preferred_skills, list the concrete skills, tools, "
+    "and technologies the listing names (these are matched against a resume)."
 )
 
 _ALIAS_SYSTEM = (

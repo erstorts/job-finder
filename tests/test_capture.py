@@ -34,9 +34,10 @@ def _capture(conn, company, title, source, jd="Pipelines in Python."):
     extraction = {"company_name": company, "title": title}
     job_id = insert_job(
         conn,
-        company_name=company, title=title, location=None, remote_flag=None,
-        jd_text=jd, salary_min=None, salary_max=None, benefits=None,
-        company_description=None, extracted_json=json.dumps(extraction),
+        company_name=company, title=title, location_type=None,
+        jd_text=jd, salary_min=None, salary_max=None,
+        cover_letter_option=None, date_posted=None,
+        extracted_json=json.dumps(extraction),
     )
     add_listing(conn, job_id, source_site=source, url=None, raw_title=title)
     # Stamp 'found' explicitly so tests are independent of the wall clock.
@@ -70,7 +71,7 @@ def test_current_status_is_latest_event() -> None:
     conn = _db()
     job_id = _capture(conn, "Globex", "ML Engineer", "greenhouse")
     add_status_event(conn, job_id, "applied", occurred_at="2026-06-10T09:00:00")
-    add_status_event(conn, job_id, "recruiter_screen", occurred_at="2026-06-12T09:00:00")
+    add_status_event(conn, job_id, "landed_interview", occurred_at="2026-06-12T09:00:00")
     # Backwards move recorded later in time wins (event log, not a column).
     add_status_event(conn, job_id, "rejected", occurred_at="2026-06-14T09:00:00")
     assert current_status(conn, job_id) == "rejected"

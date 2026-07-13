@@ -44,16 +44,13 @@ DEFAULT_DB_PATH = _ROOT / "data" / "jobs.db"
 # moves are still allowed because current status is derived from the latest
 # status_event, not constrained by sort_order (PRD §6 status_event rationale).
 STATUS_SEED: tuple[tuple[str, int, int], ...] = (
-    # name,             sort_order, is_terminal
-    ("found",            0, 0),
-    ("applied",          1, 0),
-    ("recruiter_screen", 2, 0),
-    ("hiring_manager",   3, 0),
-    ("onsite",           4, 0),
-    ("offer",            5, 1),
-    ("rejected",         6, 1),
-    ("ghosted",          7, 1),
-    ("withdrawn",        8, 1),
+    # name,              sort_order, is_terminal
+    ("found",             0, 0),   # pursued at triage; on the to-do list
+    ("passed",            1, 1),   # passed at triage; off the to-do list
+    ("applied",           2, 0),   # applied; in the pipeline
+    ("landed_interview",  3, 0),   # outcome: landed an interview
+    ("rejected",          4, 1),   # outcome: rejection email
+    ("ghosted",           5, 1),   # outcome: no response
 )
 
 
@@ -165,10 +162,7 @@ def get_profile(conn: sqlite3.Connection) -> dict[str, Any] | None:
         The profile columns keyed by name, or ``None`` before first save.
     """
     row = conn.execute(
-        "SELECT id, resume_text, linkedin_text, target_description, "
-        "target_company_types, target_seniority, target_min_comp, "
-        "target_remote_ok, target_locations "
-        "FROM profile WHERE id = ?",
+        "SELECT id, resume_text, linkedin_text FROM profile WHERE id = ?",
         (PROFILE_ID,),
     ).fetchone()
     return dict(row) if row is not None else None
@@ -179,50 +173,24 @@ def save_profile(
     *,
     resume_text: str | None,
     linkedin_text: str | None,
-    target_description: str | None,
-    target_company_types: str | None,
-    target_seniority: str | None,
-    target_min_comp: int | None,
-    target_remote_ok: int | None,
-    target_locations: str | None,
 ) -> None:
-    """Insert or replace the single profile row (PRD S1, S2).
+    """Insert or replace the single profile row (resume + LinkedIn text).
 
     Uses ``INSERT ... ON CONFLICT(id) DO UPDATE`` keyed on the fixed
-    :data:`PROFILE_ID` so there is always exactly one profile row. JSON columns
-    (``target_company_types``, ``target_locations``) are passed pre-serialized
-    by the caller and must hold valid JSON or ``NULL`` (DATA2).
+    :data:`PROFILE_ID` so there is always exactly one profile row. These two
+    text fields are the only inputs the ATS keyword match reads.
 
     Side effects
     ------------
     Writes and commits the profile row.
     """
     conn.execute(
-        "INSERT INTO profile ("
-        "  id, resume_text, linkedin_text, target_description, "
-        "  target_company_types, target_seniority, target_min_comp, "
-        "  target_remote_ok, target_locations"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO profile (id, resume_text, linkedin_text) "
+        "VALUES (?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET "
         "  resume_text = excluded.resume_text, "
-        "  linkedin_text = excluded.linkedin_text, "
-        "  target_description = excluded.target_description, "
-        "  target_company_types = excluded.target_company_types, "
-        "  target_seniority = excluded.target_seniority, "
-        "  target_min_comp = excluded.target_min_comp, "
-        "  target_remote_ok = excluded.target_remote_ok, "
-        "  target_locations = excluded.target_locations",
-        (
-            PROFILE_ID,
-            resume_text,
-            linkedin_text,
-            target_description,
-            target_company_types,
-            target_seniority,
-            target_min_comp,
-            target_remote_ok,
-            target_locations,
-        ),
+        "  linkedin_text = excluded.linkedin_text",
+        (PROFILE_ID, resume_text, linkedin_text),
     )
     conn.commit()
 
@@ -304,13 +272,12 @@ def insert_job(
     *,
     company_name: str | None,
     title: str | None,
-    location: str | None,
-    remote_flag: int | None,
+    location_type: str | None,
     jd_text: str | None,
     salary_min: int | None,
     salary_max: int | None,
-    benefits: str | None,
-    company_description: str | None,
+    cover_letter_option: int | None,
+    date_posted: str | None,
     extracted_json: str | None,
     date_first_seen: str | None = None,
 ) -> int:
@@ -318,31 +285,32 @@ def insert_job(
 
     The ``*_norm`` blocking keys are computed here (once, at capture) via the
     pure normalizers in :mod:`src.dedup`, so dedup later compares precomputed
-    values. ``extracted_json`` is the frozen extraction contract (X2): written
-    once and never regenerated.
+    values. ``extracted_json`` is the frozen extraction contract: written once
+    and never regenerated.
 
-    Score and decision are filled in separately by :func:`set_score` and
-    :func:`set_decision`.
+    ``location_type`` is "denver" or "remote"; ``cover_letter_option`` is 0/1
+    for whether the listing offers a cover letter; ``date_posted`` is the ISO
+    date the listing was posted (drives "time since posted"). Score and decision
+    are filled in separately by :func:`set_score` and :func:`set_decision`.
     """
     date_first_seen = date_first_seen or now_iso()
     cur = conn.execute(
         "INSERT INTO job ("
-        "  company_name, company_name_norm, title, title_norm, location, "
-        "  remote_flag, jd_text, salary_min, salary_max, benefits, "
-        "  company_description, date_first_seen, extracted"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "  company_name, company_name_norm, title, title_norm, location_type, "
+        "  jd_text, salary_min, salary_max, cover_letter_option, date_posted, "
+        "  date_first_seen, extracted"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             company_name,
             dedup.normalize_company(company_name),
             title,
             dedup.normalize_title(title),
-            location,
-            remote_flag,
+            location_type,
             jd_text,
             salary_min,
             salary_max,
-            benefits,
-            company_description,
+            cover_letter_option,
+            date_posted,
             date_first_seen,
             extracted_json,
         ),
@@ -474,15 +442,16 @@ def list_pipeline(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT
-            j.id              AS job_id,
-            j.company_name    AS company_name,
-            j.title           AS title,
-            j.location        AS location,
-            j.remote_flag     AS remote_flag,
-            j.salary_min      AS salary_min,
-            j.salary_max      AS salary_max,
-            j.match_score     AS match_score,
-            j.decision        AS decision,
+            j.id                  AS job_id,
+            j.company_name        AS company_name,
+            j.title               AS title,
+            j.location_type       AS location_type,
+            j.salary_min          AS salary_min,
+            j.salary_max          AS salary_max,
+            j.cover_letter_option AS cover_letter_option,
+            j.date_posted         AS date_posted,
+            j.match_score         AS match_score,
+            j.decision            AS decision,
             (SELECT se.status FROM status_event se WHERE se.job_id = j.id
              ORDER BY se.occurred_at DESC, se.id DESC LIMIT 1) AS current_status,
             (SELECT se.occurred_at FROM status_event se WHERE se.job_id = j.id
@@ -498,6 +467,33 @@ def list_pipeline(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+# Statuses that mean "has been applied to" — the pipeline view (P1).
+APPLIED_STATUSES: tuple[str, ...] = (
+    "applied", "landed_interview", "rejected", "ghosted",
+)
+
+
+def list_todo(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return the to-do list: jobs whose current status is ``found`` (L1).
+
+    These are pursued-but-not-yet-applied jobs. Each row carries everything the
+    to-do table shows: the triage flags, the ATS score, and the apply link.
+    """
+    return [r for r in list_pipeline(conn) if r["current_status"] == "found"]
+
+
+def list_applied(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return the pipeline: jobs that have been applied to (P1).
+
+    Current status is one of :data:`APPLIED_STATUSES`. Ordered by most recent
+    activity so the freshest applications sort first.
+    """
+    return [
+        r for r in list_pipeline(conn)
+        if r["current_status"] in APPLIED_STATUSES
+    ]
+
+
 # =========================================================================
 # Application labels (PRD L1, L2). 1:1 with job in v1. Recording an application
 # also appends an `applied` status event (the L2 part is done by the caller via
@@ -510,27 +506,22 @@ def save_application(
     job_id: int,
     *,
     applied_at: str | None,
-    applied_via: str | None,
-    cover_letter: int,
-    tailored_resume: int,
-    referral: int,
+    linkedin_contact: int,
 ) -> None:
-    """Insert or replace the application labels for a job (L1).
+    """Insert or replace the apply-time labels for a job (L1).
 
-    Upsert keyed on the job_id primary key so re-saving updates in place. These
-    labels double as the independent variables in the analytics (§A).
+    Upsert keyed on the job_id primary key so re-saving updates in place.
+    ``linkedin_contact`` (found someone on LinkedIn to message) is the one
+    question the apply popup asks and doubles as an independent variable in
+    analytics (§A).
     """
     conn.execute(
-        "INSERT INTO application ("
-        "  job_id, applied_at, applied_via, cover_letter, tailored_resume, referral"
-        ") VALUES (?, ?, ?, ?, ?, ?) "
+        "INSERT INTO application (job_id, applied_at, linkedin_contact) "
+        "VALUES (?, ?, ?) "
         "ON CONFLICT(job_id) DO UPDATE SET "
         "  applied_at = excluded.applied_at, "
-        "  applied_via = excluded.applied_via, "
-        "  cover_letter = excluded.cover_letter, "
-        "  tailored_resume = excluded.tailored_resume, "
-        "  referral = excluded.referral",
-        (job_id, applied_at, applied_via, cover_letter, tailored_resume, referral),
+        "  linkedin_contact = excluded.linkedin_contact",
+        (job_id, applied_at, linkedin_contact),
     )
     conn.commit()
 
@@ -538,8 +529,8 @@ def save_application(
 def get_application(conn: sqlite3.Connection, job_id: int) -> dict[str, Any] | None:
     """Return a job's application labels, or ``None`` if not yet logged."""
     row = conn.execute(
-        "SELECT job_id, applied_at, applied_via, cover_letter, tailored_resume, "
-        "referral FROM application WHERE job_id = ?",
+        "SELECT job_id, applied_at, linkedin_contact FROM application "
+        "WHERE job_id = ?",
         (job_id,),
     ).fetchone()
     return dict(row) if row is not None else None
@@ -559,16 +550,18 @@ def jobs_in_statuses(
 
 
 def analytics_dataset(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Assemble one record per job for the analytics funnel (PRD §A).
+    """Assemble one record per job for the outcome analytics (§A).
 
-    Each record carries the frozen score, the distinct source sites, the
-    application labels, and the full ordered status-event history. All funnel and
-    segmentation math runs in :mod:`src.analytics` over these records, keeping
-    the SQL here and the (pure, testable) computation there.
+    Each record carries the independent variables the user wants to compare
+    (source, Denver/remote, min salary, ATS score, days since posted, cover
+    letter option, LinkedIn contact) plus the full ordered status-event history
+    so :mod:`src.analytics` can derive the outcome (interview/rejected/ghosted).
+    All segmentation math runs there; the SQL stays here.
     """
     records: list[dict[str, Any]] = []
     job_rows = conn.execute(
-        "SELECT id, match_score FROM job ORDER BY id"
+        "SELECT id, match_score, salary_min, location_type, cover_letter_option, "
+        "date_posted, date_first_seen FROM job ORDER BY id"
     ).fetchall()
     for job in job_rows:
         job_id = job["id"]
@@ -586,12 +579,13 @@ def analytics_dataset(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         records.append({
             "job_id": job_id,
             "match_score": job["match_score"],
+            "salary_min": job["salary_min"],
+            "location_type": job["location_type"],
+            "cover_letter_option": bool(job["cover_letter_option"]),
+            "date_posted": job["date_posted"],
+            "date_first_seen": job["date_first_seen"],
             "sources": [s["source_site"] for s in sources],
-            "labels": {
-                "cover_letter": bool(app and app["cover_letter"]),
-                "tailored_resume": bool(app and app["tailored_resume"]),
-                "referral": bool(app and app["referral"]),
-            },
+            "linkedin_contact": bool(app and app["linkedin_contact"]),
             "events": [dict(e) for e in events],
         })
     return records

@@ -1,6 +1,7 @@
-"""Determinism + gate tests for match scoring (PRD REPEAT4, §9.2).
+"""Determinism tests for the ATS keyword-match scoring.
 
-Uses the real config.toml so the locked expected values track the shipped rubric.
+Uses the real config.toml so the locked expected values track the shipped rubric
+(required 0.70 / preferred 0.30 weights, bands strong=80 / moderate=50).
 """
 
 from __future__ import annotations
@@ -17,75 +18,60 @@ ALIASES = [
 ]
 
 PROFILE = {
-    "resume_text": "Bachelor of Science. Built pipelines with python, airflow, sql.",
-    "target_seniority": "senior",
-    "target_company_types": '["saas"]',
-    "target_min_comp": 100000,
-    "target_remote_ok": 1,
-    "target_locations": '["Remote"]',
+    "resume_text": "Built pipelines with python, airflow, sql.",
+    "linkedin_text": None,
 }
 
-# Required skills both matched, preferred missed; perfect seniority/fit/comp.
-# Hand-computed composite (weights 0.45/0.20/0.15/0.15/0.05):
-#   0.45*1.0 + 0.20*0.0 + 0.15*1.0 + 0.15*1.0 + 0.05*1.0 = 0.80 -> 80.0
-GOOD_EXTRACTION = {
+# Required both matched (coverage 1.0), preferred missed (coverage 0.0).
+#   100 * (1.0*0.70 + 0.0*0.30) / (0.70+0.30) = 70.0 -> moderate band.
+EXTRACTION = {
     "required_skills": ["Python", "Airflow"],
     "preferred_skills": ["Spark"],
-    "seniority": "senior",
-    "company_types": ["saas"],
-    "salary_min": 120000,
-    "salary_max": 150000,
-    "degree_required": False,
-    "hard_constraints": [],
-    "remote_flag": True,
-    "location": "Remote",
 }
 
 
-def test_composite_is_exact_and_repeatable() -> None:
-    r1 = scoring.score_job(GOOD_EXTRACTION, PROFILE, ALIASES, CONFIG)
-    r2 = scoring.score_job(GOOD_EXTRACTION, PROFILE, ALIASES, CONFIG)
-    assert r1.score == 80.0
-    assert r1.recommendation == "apply"
+def test_score_is_exact_and_repeatable() -> None:
+    r1 = scoring.score_job(EXTRACTION, PROFILE, ALIASES, CONFIG)
+    r2 = scoring.score_job(EXTRACTION, PROFILE, ALIASES, CONFIG)
+    assert r1.score == 70.0
+    assert r1.band == "moderate"
     assert r1.breakdown == r2.breakdown  # full determinism, not just the number
 
 
-def test_breakdown_records_skills() -> None:
-    r = scoring.score_job(GOOD_EXTRACTION, PROFILE, ALIASES, CONFIG)
+def test_breakdown_records_matched_and_missing() -> None:
+    r = scoring.score_job(EXTRACTION, PROFILE, ALIASES, CONFIG)
     assert r.breakdown["matched_required"] == ["Python", "Airflow"]
     assert r.breakdown["missed_preferred"] == ["Spark"]
-    assert r.breakdown["sub_scores"]["required_skill_coverage"] == 1.0
+    assert r.breakdown["required_coverage"] == 1.0
+    # The missing-keywords list is what to add to the resume/LinkedIn.
+    assert r.breakdown["missing_keywords"] == ["Spark"]
 
 
-def test_degree_gate_forces_pass() -> None:
-    profile_no_degree = {**PROFILE, "resume_text": "python airflow sql pipelines"}
-    extraction = {**GOOD_EXTRACTION, "degree_required": True}
-    r = scoring.score_job(extraction, profile_no_degree, ALIASES, CONFIG)
-    assert r.recommendation == "pass"
-    assert r.breakdown["gate_failed"] is True
-    assert any(g["name"] == "degree" and not g["passed"] for g in r.breakdown["gates"])
+def test_linkedin_text_is_not_scored() -> None:
+    # Airflow appears only in LinkedIn text, which the ATS score ignores, so it
+    # stays a miss and required coverage is only 1/2.
+    profile = {"resume_text": "python sql", "linkedin_text": "airflow orchestration"}
+    r = scoring.score_job(EXTRACTION, profile, ALIASES, CONFIG)
+    assert r.breakdown["matched_required"] == ["Python"]
+    assert r.breakdown["missed_required"] == ["Airflow"]
+    assert r.breakdown["required_coverage"] == 0.5
 
 
-def test_seniority_gate_forces_pass() -> None:
-    extraction = {**GOOD_EXTRACTION, "seniority": "intern"}  # 3 bands from senior
+def test_only_required_list_is_scored_alone() -> None:
+    # No preferred list -> score is pure required coverage (renormalized).
+    extraction = {"required_skills": ["Python"], "preferred_skills": []}
     r = scoring.score_job(extraction, PROFILE, ALIASES, CONFIG)
-    assert r.recommendation == "pass"
-    assert any(g["name"] == "seniority" and not g["passed"] for g in r.breakdown["gates"])
+    assert r.score == 100.0
+    assert r.band == "strong"
 
 
-def test_hard_constraint_gate_forces_pass() -> None:
-    extraction = {**GOOD_EXTRACTION, "hard_constraints": ["US Citizenship required"]}
-    r = scoring.score_job(extraction, PROFILE, ALIASES, CONFIG)
-    assert r.recommendation == "pass"
-    assert any(g["name"] == "hard_constraint" for g in r.breakdown["gates"])
+def test_no_skills_is_unscorable() -> None:
+    r = scoring.score_job({"required_skills": [], "preferred_skills": []}, PROFILE, ALIASES, CONFIG)
+    assert r.score == 0.0
+    assert r.breakdown["scorable"] is False
 
 
-def test_profile_has_degree() -> None:
-    assert scoring.profile_has_degree("B.S. in Computer Science") is True
-    assert scoring.profile_has_degree("self-taught, no formal schooling") is False
-
-
-def test_band_distance() -> None:
-    assert scoring.band_distance("senior", "senior", CONFIG) == 0
-    assert scoring.band_distance("intern", "senior", CONFIG) == 3
-    assert scoring.band_distance("unknown", "senior", CONFIG) is None
+def test_band_for_thresholds() -> None:
+    assert scoring.band_for(80, CONFIG) == "strong"
+    assert scoring.band_for(50, CONFIG) == "moderate"
+    assert scoring.band_for(49, CONFIG) == "weak"

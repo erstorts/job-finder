@@ -52,9 +52,9 @@ def test_status_table_seeded() -> None:
         "SELECT name, sort_order, is_terminal FROM status ORDER BY sort_order"
     ).fetchall()
     assert len(rows) == len(STATUS_SEED)
-    # Terminal stages per PRD §6 comment.
+    # Terminal stages: passed at triage + the two negative outcomes.
     terminal = {r["name"] for r in rows if r["is_terminal"] == 1}
-    assert terminal == {"offer", "rejected", "ghosted", "withdrawn"}
+    assert terminal == {"passed", "rejected", "ghosted"}
 
 
 def test_init_is_idempotent() -> None:
@@ -69,37 +69,17 @@ def test_profile_upsert_keeps_single_row() -> None:
     conn = _fresh_db()
     assert get_profile(conn) is None  # nothing saved yet
 
-    save_profile(
-        conn,
-        resume_text="python sql airflow",
-        linkedin_text=None,
-        target_description="data infra startups",
-        target_company_types='["saas", "startup"]',
-        target_seniority="senior",
-        target_min_comp=150000,
-        target_remote_ok=1,
-        target_locations='["Remote"]',
-    )
+    save_profile(conn, resume_text="python sql airflow", linkedin_text="li text")
     p = get_profile(conn)
     assert p is not None
     assert p["resume_text"] == "python sql airflow"
-    assert p["target_seniority"] == "senior"
+    assert p["linkedin_text"] == "li text"
 
     # Saving again must update in place, not create a second row.
-    save_profile(
-        conn,
-        resume_text="python sql spark",
-        linkedin_text=None,
-        target_description=None,
-        target_company_types=None,
-        target_seniority="staff",
-        target_min_comp=None,
-        target_remote_ok=0,
-        target_locations=None,
-    )
+    save_profile(conn, resume_text="python sql spark", linkedin_text=None)
     (count,) = conn.execute("SELECT COUNT(*) FROM profile").fetchone()
     assert count == 1
-    assert get_profile(conn)["target_seniority"] == "staff"
+    assert get_profile(conn)["resume_text"] == "python sql spark"
 
 
 def test_skill_alias_crud() -> None:

@@ -1,62 +1,47 @@
 # =========================================================================
-# JAMS configuration (PRD TECH7, REPEAT3).
+# JAMS configuration.
 #
-# Every tunable value in the system lives here so behavior can be changed
-# without editing code. There must be NO magic numbers in logic modules;
-# they read from this file (loaded once via tomllib in src/config.py).
+# Every tunable value lives here so behavior can be changed without editing
+# code. Logic modules read from this file (loaded once via tomllib in
+# src/config.py); no magic numbers in logic modules.
 #
-# The rubric is versioned: `rubric.version` is stored on each scored job so
+# The rubric is versioned: `scoring.version` is stored on each scored job so
 # historical scores stay interpretable after the weights are tuned.
 # =========================================================================
 
 [llm]
-# Structured-extraction model (PRD §4 LLM provider note). Pinned here so the
-# only LLM touchpoint is reproducible at the config level. Confirm the current
-# model string against the official docs at build time (O1).
+# Structured-extraction model. Pinned here so the only LLM touchpoint is
+# reproducible at the config level.
 model = "claude-sonnet-4-6"
 max_tokens = 2048
 
 [dedup]
-# Title-similarity thresholds for record linkage (PRD §9.1), applied AFTER
-# blocking on normalized company name. rapidfuzz token_sort_ratio, 0-100.
-confident_duplicate = 90   # >= this -> confident duplicate, attach listing, block re-apply
+# Title-similarity thresholds for record linkage, applied AFTER blocking on
+# normalized company name. rapidfuzz token_sort_ratio, 0-100.
+confident_duplicate = 90   # >= this -> confident duplicate, attach listing
 borderline_floor = 75      # [borderline_floor, confident_duplicate) -> ask the user
 
 [followup]
-# Time-based pipeline flags (PRD P3), in days since the last status_event.
-# These are computed, never manually set.
-followup_days = 7          # non-terminal job idle this long -> needs follow-up
-ghosted_days = 21          # no response this long -> likely ghosted
+# Time-based staleness, in days since the last status_event. Used to highlight
+# idle applications in the pipeline. Computed, never manually set.
+followup_days = 7          # applied job idle this long -> worth a nudge
+ghosted_days = 21          # no response this long -> probably ghosted
 
 [scoring]
 # Active rubric version label, stored on each job as rubric_version.
-version = "v1"
-# Apply / pass threshold for the 0-100 composite (PRD §9.2). Configurable.
-apply_threshold = 60
-# Max allowed distance (in seniority bands) before the seniority hard gate
-# fails (PRD §9.2 hard gates).
-seniority_gate_max_distance = 1
+version = "ats-v1"
 
 [scoring.weights]
-# Soft-criteria weights for rubric v1 (PRD §9.2). Should sum to 1.0.
-required_skill_coverage  = 0.45
-preferred_skill_coverage = 0.20
-seniority_alignment      = 0.15
-target_fit               = 0.15
-comp_floor_met           = 0.05
+# ATS keyword-coverage weights. The score is a weighted blend of how many of
+# the listing's required vs preferred skills already appear in the resume +
+# LinkedIn text. Renormalized when a listing has only one of the two lists.
+required_skill_coverage  = 0.70
+preferred_skill_coverage = 0.30
 
-[scoring.gates]
-# Hard constraints the user cannot meet (PRD §9.2). A listing whose extracted
-# hard_constraints intersect this set defaults to "pass". Edit to match the
-# owner's real situation; matching is case-insensitive substring.
-unmeetable_constraints = [
-    "security clearance",
-    "us citizenship",
-    "ts/sci",
-]
-
-[seniority]
-# Ordinal seniority bands, lowest to highest. Index distance between two bands
-# drives the seniority gate and the seniority_alignment sub-score. Shared
-# vocabulary between the profile target and the extraction contract.
-bands = ["intern", "junior", "mid", "senior", "staff", "lead", "manager"]
+[scoring.bands]
+# Score thresholds (0-100) for the guidance label shown next to the number.
+#   >= strong   -> "Strong match — apply as-is"
+#   >= moderate -> "Moderate — consider adding the missing keywords"
+#   <  moderate -> "Weak — update resume/LinkedIn or pass"
+strong = 80
+moderate = 50
